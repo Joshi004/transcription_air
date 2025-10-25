@@ -15,9 +15,11 @@ import {
   NavigateBefore as PreviousIcon,
   NavigateNext as NextIcon,
 } from '@mui/icons-material';
+import CustomAudioControls from './CustomAudioControls';
 
 const AudioPlayer = ({ audioFile, transcript, audioUrl, onBack }) => {
   const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [activeSegmentIndex, setActiveSegmentIndex] = useState(null);
   const audioRef = useRef(null);
   const segmentRefs = useRef({});
@@ -48,6 +50,12 @@ const AudioPlayer = ({ audioFile, transcript, audioUrl, onBack }) => {
   const handleTimeUpdate = () => {
     if (audioRef.current) {
       setCurrentTime(audioRef.current.currentTime);
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    if (audioRef.current) {
+      setDuration(audioRef.current.duration);
     }
   };
 
@@ -163,54 +171,87 @@ const AudioPlayer = ({ audioFile, transcript, audioUrl, onBack }) => {
   };
 
   return (
-    <Box>
-      <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-        <IconButton onClick={onBack}>
-          <BackIcon />
-        </IconButton>
-        <Typography variant="h5">{audioFile.filename}</Typography>
-      </Box>
+    <Box sx={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      height: '100vh',
+      overflow: 'hidden',
+      p: 2 
+    }}>
+      {/* Fixed Header and Audio Player */}
+      <Box sx={{ flexShrink: 0 }}>
+        <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+          <IconButton onClick={onBack}>
+            <BackIcon />
+          </IconButton>
+          <Typography variant="h5">{audioFile.filename}</Typography>
+        </Box>
 
-      {/* Audio Player */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Audio Player
-          </Typography>
-          <audio
-            ref={audioRef}
-            controls
-            style={{ width: '100%' }}
-            onTimeUpdate={handleTimeUpdate}
-            src={audioUrl}
-          >
-            Your browser does not support the audio element.
-          </audio>
-        </CardContent>
-      </Card>
+        {/* Audio Player */}
+        <Card sx={{ mb: 2 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Audio Player
+            </Typography>
+            
+            {/* Hidden Audio Element */}
+            <audio
+              ref={audioRef}
+              onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={handleLoadedMetadata}
+              src={audioUrl}
+              style={{ display: 'none' }}
+            >
+              Your browser does not support the audio element.
+            </audio>
+
+            {/* Custom Audio Controls with Hover Tooltip */}
+            <CustomAudioControls
+              audioRef={audioRef}
+              duration={duration}
+              currentTime={currentTime}
+              formatTime={formatTime}
+            />
+          </CardContent>
+        </Card>
+      </Box>
 
       {/* Transcript */}
       {transcript && transcript.segments && (
-        <Card>
-          <CardContent>
-            <Box sx={{ mb: 2 }}>
-              <Typography variant="h6" gutterBottom>
-                Transcript
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                <Typography variant="body2" color="text.secondary">
-                  Language: {transcript.language || 'Unknown'}
+        <Card sx={{ 
+          flex: 1, 
+          display: 'flex', 
+          flexDirection: 'column',
+          overflow: 'hidden',
+          minHeight: 0
+        }}>
+          <CardContent sx={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            height: '100%',
+            overflow: 'hidden',
+            p: 2
+          }}>
+            {/* Fixed metadata and legend section */}
+            <Box sx={{ flexShrink: 0 }}>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="h6" gutterBottom>
+                  Transcript
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Duration: {formatTime(transcript.duration || 0)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Processing Time: {transcript.processing_time?.toFixed(1) || 'N/A'}s
-                </Typography>
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Language: {transcript.language || 'Unknown'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Duration: {formatTime(transcript.duration || 0)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Processing Time: {transcript.processing_time?.toFixed(1) || 'N/A'}s
+                  </Typography>
+                </Box>
               </Box>
-            </Box>
 
-            <Divider sx={{ mb: 2 }} />
+              <Divider sx={{ mb: 2 }} />
 
             {/* Interactive Confidence Navigation */}
             <Box sx={{ mb: 2, p: 2, backgroundColor: 'rgba(0, 0, 0, 0.02)', borderRadius: 1 }}>
@@ -319,9 +360,16 @@ const AudioPlayer = ({ audioFile, transcript, audioUrl, onBack }) => {
                 Click any confidence level to jump to segments. Use arrows to navigate or click again for next.
               </Typography>
             </Box>
+            </Box>
 
-            {/* Transcript Segments */}
-            <Box sx={{ maxHeight: '60vh', overflowY: 'auto' }}>
+            {/* Scrollable Transcript Segments */}
+            <Box sx={{ 
+              flex: 1,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              pr: 1,
+              minHeight: 0
+            }}>
               {transcript.segments.map((segment, index) => {
                 const confidenceColor = getConfidenceColor(segment.avg_logprob || 0);
                 const confidenceLabel = getConfidenceLabel(segment.avg_logprob || 0);
