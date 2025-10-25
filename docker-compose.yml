@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: transcription-backend
+    ports:
+      - "5501:5501"
+    volumes:
+      - ./Audio:/audio:ro                  # Audio files (read-only)
+      - ./transcripts:/transcripts         # Output transcripts
+    environment:
+      - WHISPER_SERVICE_URL=${WHISPER_SERVICE_URL:-http://host.docker.internal:8501}
+      - AUDIO_DIR=/audio
+      - TRANSCRIPT_DIR=/transcripts
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - transcription-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: transcription-frontend
+    ports:
+      - "3501:3501"
+    environment:
+      - REACT_APP_BACKEND_URL=http://localhost:5501
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - transcription-network
+
+networks:
+  transcription-network:
+    driver: bridge
+
