@@ -1,11 +1,10 @@
 # 🎙️ Audio Transcription Service
 
-A full-stack application for transcribing audio files with speaker diarization using **Whisper Large v3** and **Pyannote 3.0**.
+A full-stack application for transcribing audio files using **Whisper Large v3**.
 
 ## Features
 
 - 📝 **Accurate Transcription**: Using OpenAI's Whisper Large v3 model
-- 👥 **Speaker Diarization**: Identifies and labels different speakers using Pyannote 3.0
 - ⏱️ **Timestamped Segments**: Word-level timestamps for precise alignment
 - 🎵 **Audio Playback**: Play audio files directly in the browser
 - 🔄 **Synchronized View**: Transcript highlights in sync with audio playback
@@ -16,8 +15,8 @@ A full-stack application for transcribing audio files with speaker diarization u
 ## Architecture
 
 ```
-Frontend (React + Material UI) → Backend (Flask API) → ML Models (Whisper + Pyannote)
-    Port 3501                         Port 5501              Host Machine
+Frontend (React + Material UI) → Backend (Flask API) → Whisper Service
+    Port 3501                         Port 5501          Port 8501
 ```
 
 ### Tech Stack
@@ -25,7 +24,6 @@ Frontend (React + Material UI) → Backend (Flask API) → ML Models (Whisper + 
 **Backend:**
 - Flask (REST API)
 - Whisper Large v3 (Transcription)
-- Pyannote 3.0 (Speaker Diarization)
 - Threading (Async processing)
 
 **Frontend:**
@@ -40,10 +38,8 @@ Frontend (React + Material UI) → Backend (Flask API) → ML Models (Whisper + 
 ## Prerequisites
 
 1. **Docker** and **Docker Compose** installed
-2. **Hugging Face Account** - Get your token from [https://huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
-3. **Accept Pyannote License** - Visit [https://huggingface.co/pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) and accept the model license
-4. **Python 3.10+** (for model download script)
-5. **~4GB free disk space** for models
+2. **Python 3.10+** (for Whisper service)
+3. **~3GB free disk space** for Whisper model
 
 ## Setup Instructions
 
@@ -53,45 +49,18 @@ Frontend (React + Material UI) → Backend (Flask API) → ML Models (Whisper + 
 cd /Users/nareshjoshi/Documents/TetherWorkspace/TranscriptionService
 ```
 
-### Step 2: Configure Environment Variables
+### Step 2: Configure Environment Variables (Optional)
 
-Create a `.env` file in the project root:
+If you have a `.env` file, it will be loaded automatically. No specific configuration is required for basic operation.
 
-```bash
-# Copy the example file
-cp .env.example .env
-
-# Edit the .env file and add your Hugging Face token
-nano .env
-```
-
-Update the `HF_TOKEN` value:
-```env
-HF_TOKEN=hf_your_token_here
-```
-
-### Step 3: Download ML Models (One-Time Setup)
-
-**Option A: Using the download script (Recommended)**
+### Step 3: Install Whisper Service Dependencies
 
 ```bash
-# Install Python dependencies (if not already installed)
-pip install openai-whisper pyannote.audio torch
-
-# Set your Hugging Face token
-export HF_TOKEN=hf_your_token_here
-
-# Run the download script
-python download_models.py
+# Install Python dependencies for Whisper service
+pip3 install -r whisper-service/requirements.txt
 ```
 
-This will download:
-- Whisper Large v3 (~3GB) to `./models/whisper/`
-- Pyannote 3.1 (~500MB) to `./models/pyannote/`
-
-**Option B: Let Docker download on first run**
-
-Skip this step, and models will be downloaded automatically when the backend container starts (slower first launch).
+The Whisper model (~3GB) will be downloaded automatically on first run.
 
 ### Step 4: Place Audio Files
 
@@ -105,17 +74,14 @@ ls Audio/
 
 Supported formats: `.mp3`, `.wav`, `.m4a`, `.flac`, `.ogg`
 
-### Step 5: Build and Run with Docker Compose
+### Step 5: Start All Services
 
 ```bash
-# Build the containers
-docker-compose build
-
-# Start the services
-docker-compose up
+# Start Whisper service, backend, and frontend
+./start-all-services.sh
 ```
 
-**First launch may take 2-3 minutes** as models are loaded into memory.
+**First launch may take 2-3 minutes** as the Whisper model is loaded into memory.
 
 ### Step 6: Access the Application
 
@@ -144,9 +110,8 @@ The home page displays all audio files from the `Audio/` directory with their:
 Click the **"Transcribe"** button on any audio file. 
 
 ⏱️ **Processing Time**: For a 30-minute audio file, expect:
-- Whisper: 15-25 minutes
-- Pyannote: 5-10 minutes
-- **Total: ~20-35 minutes** on CPU
+- **~15-25 minutes** on CPU (MacBook Pro)
+- **~3-5 minutes** on GPU server
 
 The UI will poll for updates every 5 seconds and show progress.
 
@@ -155,7 +120,7 @@ The UI will poll for updates every 5 seconds and show progress.
 Once processing is complete:
 - Click **"View & Play"** to open the synchronized player
 - Audio player at the top
-- Transcript segments below with speaker labels
+- Transcript segments below with timestamps
 - Active segment highlights automatically as audio plays
 - Click any segment to jump to that timestamp
 
@@ -173,7 +138,6 @@ Transcripts are saved as JSON in `transcripts/` directory:
     {
       "start": 0.0,
       "end": 2.5,
-      "speaker": "SPEAKER_00",
       "text": "Hello, how are you?"
     }
   ]
@@ -231,8 +195,6 @@ TranscriptionService/
 │   └── mentlist.mp3
 ├── backend/                  # Flask API
 │   ├── app.py               # Main Flask application
-│   ├── model_manager.py     # Model loading logic
-│   ├── transcription_processor.py  # Transcription pipeline
 │   ├── requirements.txt     # Python dependencies
 │   └── Dockerfile
 ├── frontend/                 # React UI
@@ -246,12 +208,12 @@ TranscriptionService/
 │   ├── package.json
 │   └── Dockerfile
 ├── models/                   # ML models (host machine)
-│   ├── whisper/             # Whisper models cache
-│   └── pyannote/            # Pyannote models cache
+│   └── whisper/             # Whisper models cache
 ├── transcripts/              # Generated transcripts
+├── whisper-service/          # Whisper transcription service
+│   ├── app.py               # Whisper Flask server
+│   └── requirements.txt     # Python dependencies
 ├── docker-compose.yml        # Container orchestration
-├── download_models.py        # Model download script
-├── .env                      # Environment variables
 └── README.md                 # This file
 ```
 
@@ -282,15 +244,15 @@ MODEL_MODE=local   # Use models from host machine
 
 ## Troubleshooting
 
-### Models Not Loading
+### Whisper Service Won't Start
 
-**Problem**: Backend shows "Models not loaded" or crashes on startup.
+**Problem**: Whisper service crashes on startup or fails to load model.
 
 **Solutions**:
-1. Ensure `HF_TOKEN` is set correctly in `.env`
-2. Accept the Pyannote license at [https://huggingface.co/pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
-3. Run `python download_models.py` to pre-download models
-4. Check Docker logs: `docker-compose logs backend`
+1. Ensure Python dependencies are installed: `pip3 install -r whisper-service/requirements.txt`
+2. Check Whisper service logs: `tail -f logs/whisper-service.log`
+3. Verify model directory exists: `ls -l models/whisper/`
+4. Ensure sufficient disk space (~3GB) and RAM (~6-8GB)
 
 ### Cannot Connect to Backend
 
@@ -304,12 +266,12 @@ MODEL_MODE=local   # Use models from host machine
 
 ### Transcription Takes Too Long
 
-**Expected**: 20-35 minutes for 30-minute audio on CPU is normal.
+**Expected**: 15-25 minutes for 30-minute audio on CPU is normal.
 
-**To speed up** (future):
-- Move to GPU server with NVIDIA GPU
-- Use smaller models (Whisper Medium instead of Large)
-- Set `MODEL_MODE=remote` and use cloud-based inference
+**To speed up**:
+- Move to GPU server with NVIDIA GPU (10x faster)
+- Use smaller Whisper models (Medium or Small instead of Large v3)
+- Edit `whisper-service/app.py` to change model: `whisper.load_model("medium")`
 
 ### Audio File Not Showing
 
@@ -332,31 +294,29 @@ MODEL_MODE=local   # Use models from host machine
 ### CPU vs GPU Processing
 
 **Your Current Setup (MacBook Pro 24GB RAM, CPU):**
-- 30-min audio → 20-35 min processing
-- Memory usage: ~12-15GB peak
+- 30-min audio → 15-25 min processing
+- Memory usage: ~6-8GB during processing
 - Fan will run loud during processing
 
-**With NVIDIA GPU Server (Future):**
+**With NVIDIA GPU Server:**
 - 30-min audio → 3-5 min processing
 - 10x faster transcription
-- 5x faster diarization
 
 ## Future Enhancements
 
 - [ ] File upload via UI
-- [ ] Speaker name editing (rename SPEAKER_00 to "John")
 - [ ] Export transcripts (SRT, VTT, TXT formats)
 - [ ] Progress bar during processing
 - [ ] Batch processing queue
 - [ ] Remote API integration
 - [ ] Real-time streaming transcription
 - [ ] Multiple language models
+- [ ] Speaker diarization integration
 
 ## License
 
 This project uses:
 - **Whisper** (MIT License)
-- **Pyannote** (MIT License, requires Hugging Face license acceptance)
 
 ## Support
 
@@ -367,5 +327,5 @@ For issues or questions:
 
 ---
 
-**Built with ❤️ using Whisper Large v3 + Pyannote 3.0**
+**Built with ❤️ using Whisper Large v3**
 

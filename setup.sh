@@ -33,17 +33,9 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Check if HF_TOKEN is set
-source .env
-if [ -z "$HF_TOKEN" ] || [ "$HF_TOKEN" = "your_huggingface_token_here" ]; then
-    echo -e "${RED}✗ HF_TOKEN not set in .env file${NC}"
-    echo ""
-    echo "Please add your Hugging Face token to .env:"
-    echo "  1. Get token from: https://huggingface.co/settings/tokens"
-    echo "  2. Edit .env file and set: HF_TOKEN=hf_your_token_here"
-    echo "  3. Run this script again"
-    echo ""
-    exit 1
+# Load environment if exists
+if [ -f .env ]; then
+    source .env
 fi
 
 echo -e "${GREEN}✓ .env file configured${NC}"
@@ -52,7 +44,7 @@ echo ""
 # Check if models directory exists
 if [ ! -d "models" ]; then
     echo "Creating models directory..."
-    mkdir -p models/whisper models/pyannote
+    mkdir -p models/whisper
     echo -e "${GREEN}✓ Models directory created${NC}"
 else
     echo -e "${GREEN}✓ Models directory exists${NC}"
@@ -60,8 +52,8 @@ fi
 echo ""
 
 # Ask if user wants to download models
-echo "Do you want to download ML models now? (~4GB, recommended)"
-echo "If you skip, models will download when Docker starts (slower)."
+echo "Do you want to download Whisper model now? (~3GB, recommended)"
+echo "If you skip, model will download when service starts (slower)."
 read -p "Download models now? (y/n): " -n 1 -r
 echo ""
 
@@ -80,19 +72,19 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo ""
     
     # Ask if user wants to install dependencies
-    echo "Installing Python dependencies (whisper, pyannote.audio, torch)..."
+    echo "Installing Python dependencies (whisper, torch)..."
     echo "This may take a few minutes..."
     read -p "Install dependencies? (y/n): " -n 1 -r
     echo ""
     
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        pip3 install openai-whisper pyannote.audio torch torchaudio
+        pip3 install openai-whisper torch torchaudio
     fi
     
     echo ""
-    echo "Downloading models..."
+    echo "Downloading Whisper model..."
     export HF_TOKEN=$HF_TOKEN
-    python3 download_models.py
+    python3 -c "import whisper; whisper.load_model('large-v3', download_root='./models/whisper')"
     
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ Model download failed${NC}"

@@ -17,7 +17,7 @@ echo "Audio directory: $AUDIO_DIR"
 echo "Models directory: $MODELS_DIR"
 echo ""
 
-# Check if HF_TOKEN is set (not required for Whisper, but good practice)
+# Load environment if .env exists
 if [ -f "$PROJECT_ROOT/.env" ]; then
     echo "Loading .env file..."
     source "$PROJECT_ROOT/.env"

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This transcription service uses a **microservices architecture** with **independent model services** for maximum flexibility and scalability.
+This transcription service uses a **microservices architecture** with an **independent Whisper service** for flexibility and scalability.
 
 ---
 
@@ -15,13 +15,7 @@ Your MacBook Pro (24GB RAM):
 │                                                                  │
 │  📝 Whisper Service (Native Python - Port 8501)                 │
 │     ├─ Whisper Large v3 model                                   │
-│     ├─ Transcription only                                       │
-│     └─ Can be stopped/restarted independently                   │
-│            ↕ REST API                                            │
-│                                                                  │
-│  👥 Pyannote Service (Native Python - Port 8502)                │
-│     ├─ Pyannote 3.1 model                                       │
-│     ├─ Speaker diarization only                                 │
+│     ├─ Transcription with timestamps                            │
 │     └─ Can be stopped/restarted independently                   │
 │            ↕ REST API                                            │
 │            │                                                     │
@@ -30,8 +24,8 @@ Your MacBook Pro (24GB RAM):
 │  │  ┌──────────────────────────────────────────┐ │            │
 │  │  │  🔧 Backend (Port 5501)                  │ │            │
 │  │  │     ├─ Flask API (no ML code!)           │ │            │
-│  │  │     ├─ Orchestrates both model services  │ │            │
-│  │  │     ├─ Aligns results                    │ │            │
+│  │  │     ├─ Orchestrates Whisper service      │ │            │
+│  │  │     ├─ Manages files & transcripts       │ │            │
 │  │  │     └─ Job management                    │ │            │
 │  │  └──────────────────────────────────────────┘ │            │
 │  │            ↕ REST API                          │            │
@@ -54,8 +48,7 @@ Your MacBook Pro (24GB RAM):
 
 | Service | Port | Runs In | Purpose |
 |---------|------|---------|---------|
-| **Whisper** | 8501 | Native Mac | Transcription only |
-| **Pyannote** | 8502 | Native Mac | Speaker diarization only |
+| **Whisper** | 8501 | Native Mac | Transcription with timestamps |
 | **Backend** | 5501 | Docker | API orchestration, file mgmt |
 | **Frontend** | 3501 | Docker | User interface |
 
@@ -63,61 +56,52 @@ Your MacBook Pro (24GB RAM):
 
 ## Key Benefits
 
-### 1. Independent Services
+### 1. Independent Service
 
-✅ **Stop Whisper** without affecting Pyannote:
+✅ **Stop Whisper** without affecting Docker containers:
 ```bash
 lsof -ti:8501 | xargs kill
-# Pyannote keeps running on port 8502
+# Backend keeps running (uses minimal RAM)
 ```
 
-✅ **Restart Pyannote** without affecting Whisper:
+✅ **Restart Whisper** independently:
 ```bash
-cd pyannote-service && python3 app.py
-# Whisper keeps running on port 8501
+cd whisper-service && python3 app.py
 ```
 
-✅ **Update one model** without touching the other
+✅ **Update model** without touching other services
 
 ### 2. Flexible Deployment
 
-Run different models in different locations:
+Run Whisper locally or remotely:
 
 ```env
-# Both local
+# Local
 WHISPER_SERVICE_URL=http://localhost:8501
-PYANNOTE_SERVICE_URL=http://localhost:8502
 
-# Whisper local, Pyannote remote
-WHISPER_SERVICE_URL=http://localhost:8501
-PYANNOTE_SERVICE_URL=https://gpu-server.com:8502
-
-# Both remote
-WHISPER_SERVICE_URL=https://gpu1.example.com:8501
-PYANNOTE_SERVICE_URL=https://gpu2.example.com:8502
+# Remote GPU server
+WHISPER_SERVICE_URL=https://gpu-server.com:8501
 ```
 
 ### 3. Resource Management
 
 - **Whisper**: Memory-intensive (6-8GB when processing)
-- **Pyannote**: Lighter (2-3GB when processing)
+- **Backend**: Lightweight (~100MB)
+- **Frontend**: Lightweight (~150MB)
 
-Kill Pyannote when you need RAM for other tasks, keep Whisper running!
+Kill Whisper when you need RAM for other tasks!
 
 ### 4. Development & Testing
 
 Test different model versions independently:
 
 ```bash
-# Terminal 1: Whisper Large v3
-cd whisper-service && python3 app.py
+# Test Whisper Medium (faster, less accurate)
+cd whisper-service
+# Edit app.py: whisper.load_model("medium")
+python3 app.py  # Port 8501
 
-# Terminal 2: Whisper Medium (lighter)
-cd whisper-service-medium && python3 app.py  # Port 8503
-
-# Terminal 3: Test both
-curl http://localhost:8501/health  # Large
-curl http://localhost:8503/health  # Medium
+# No other changes needed!
 ```
 
 ---
@@ -132,8 +116,7 @@ curl http://localhost:8503/health  # Medium
 
 # Services start in this order:
 # 1. Whisper Service (2-3 min to load model)
-# 2. Pyannote Service (1-2 min to load model)
-# 3. Docker containers (10 seconds)
+# 2. Docker containers (10 seconds)
 ```
 
 ### Manual Start (More Control)
@@ -143,27 +126,10 @@ curl http://localhost:8503/health  # Medium
 cd whisper-service
 ./start.sh
 
-# Terminal 2: Pyannote
-cd pyannote-service
-./start.sh
-
-# Terminal 3: Docker
+# Terminal 2: Docker
 docker-compose up
 
 # Keep terminals open to see logs!
-```
-
-### Selective Start (Only What You Need)
-
-```bash
-# Example: Test Whisper only
-cd whisper-service && python3 app.py
-# Backend will fail to reach Pyannote, but Whisper works
-
-# Example: Skip Pyannote (for transcription-only testing)
-cd whisper-service && python3 app.py
-docker-compose up
-# Update backend to skip diarization when Pyannote unavailable
 ```
 
 ---
@@ -176,50 +142,32 @@ docker-compose up
 1. User clicks "Transcribe" on mentlist.mp3
    Frontend → Backend: POST /api/transcribe/mentlist.mp3
 
-2. Backend orchestrates both services:
+2. Backend starts Whisper job:
    
-   2a. Start Whisper job
-       Backend → Whisper: POST http://localhost:8501/transcribe
-       Whisper → Backend: {"job_id": "whisper-abc-123"} (30ms response)
-   
-   2b. Start Pyannote job (parallel!)
-       Backend → Pyannote: POST http://localhost:8502/diarize
-       Pyannote → Backend: {"job_id": "pyannote-xyz-789"} (30ms response)
+   Backend → Whisper: POST http://localhost:8501/transcribe
+   Whisper → Backend: {"job_id": "whisper-abc-123"} (30ms response)
 
-3. Backend polls both services (every 5 seconds):
+3. Backend polls Whisper service (every 5 seconds):
    
    Backend → Whisper: GET /job/whisper-abc-123
    Response: {"status": "processing", "progress": 40}
-   
-   Backend → Pyannote: GET /job/pyannote-xyz-789
-   Response: {"status": "processing", "progress": 60}
-   
-   Overall progress: (40% * 0.7) + (60% * 0.3) = 46%
 
-4. Whisper completes first (~15-20 min):
+4. Whisper completes (~15-20 min):
    Backend → Whisper: GET /job/whisper-abc-123
    Response: {"status": "completed", "result": {segments: [...]}}
 
-5. Pyannote completes (~5-10 min):
-   Backend → Pyannote: GET /job/pyannote-xyz-789
-   Response: {"status": "completed", "result": {speakers: [...]}}
-
-6. Backend aligns results:
-   - Matches Whisper segments with Pyannote speakers
-   - Creates final transcript with speaker labels
-
-7. Backend saves transcript:
+5. Backend saves transcript:
    ./transcripts/mentlist.json
 
-8. Frontend polls Backend (every 5 seconds):
+6. Frontend polls Backend (every 5 seconds):
    Frontend → Backend: GET /api/status/mentlist.mp3
    Response: {"status": "completed"}
 
-9. Frontend fetches transcript:
+7. Frontend fetches transcript:
    Frontend → Backend: GET /api/transcript/mentlist.mp3
-   Response: {full transcript with speakers}
+   Response: {full transcript with timestamps}
 
-10. User sees synchronized playback!
+8. User sees synchronized playback!
 ```
 
 ---
@@ -231,23 +179,20 @@ docker-compose up
 ```
 Audio Directory (./Audio/):
 ├── Whisper Service:  /Users/.../TranscriptionService/Audio/mentlist.mp3 (direct)
-├── Pyannote Service: /Users/.../TranscriptionService/Audio/mentlist.mp3 (direct)
 ├── Backend (Docker):  /audio/mentlist.mp3 (mounted volume)
 └── Frontend:         Via Backend API streaming endpoint
 
 Transcripts Directory (./transcripts/):
 ├── Backend (Docker):  /transcripts/mentlist.json (writes, mounted volume)
-├── Frontend:         Via Backend API JSON endpoint
-└── Model Services:   Don't write transcripts (Backend does alignment + save)
+└── Frontend:         Via Backend API JSON endpoint
 
 Models Directory (./models/):
-├── Whisper Service:  /Users/.../TranscriptionService/models/whisper/
-└── Pyannote Service: /Users/.../TranscriptionService/models/pyannote/
+└── Whisper Service:  /Users/.../TranscriptionService/models/whisper/
 ```
 
 **Key Points:**
-- Model services READ audio files
-- Backend WRITES transcripts (after aligning results from both services)
+- Whisper service READS audio files
+- Backend WRITES transcripts (with Whisper results)
 - All share the same physical files via different paths
 
 ---
@@ -257,12 +202,8 @@ Models Directory (./models/):
 ### Environment Variables (.env)
 
 ```env
-# Model Service URLs (change these for remote deployment)
+# Whisper Service URL (change for remote deployment)
 WHISPER_SERVICE_URL=http://host.docker.internal:8501
-PYANNOTE_SERVICE_URL=http://host.docker.internal:8502
-
-# Hugging Face Token (required for Pyannote)
-HF_TOKEN=hf_your_token_here
 
 # Docker paths
 AUDIO_DIR=/audio
@@ -274,38 +215,28 @@ TRANSCRIPT_DIR=/transcripts
 ```bash
 # All local (current)
 WHISPER_SERVICE_URL=http://host.docker.internal:8501
-PYANNOTE_SERVICE_URL=http://host.docker.internal:8502
 
-# Whisper on GPU, Pyannote local
+# Whisper on GPU server
 WHISPER_SERVICE_URL=https://gpu-server.com:8501
-PYANNOTE_SERVICE_URL=http://host.docker.internal:8502
 
-# Both on GPU (different servers!)
-WHISPER_SERVICE_URL=https://gpu1.example.com:8501
-PYANNOTE_SERVICE_URL=https://gpu2.example.com:8502
-
-# Load balanced Whisper, single Pyannote
-WHISPER_SERVICE_URL=https://whisper-lb.example.com  # Load balancer
-PYANNOTE_SERVICE_URL=https://gpu-server.com:8502
+# No code changes needed - just update .env and restart!
 ```
-
-**No code changes needed - just update .env and restart!**
 
 ---
 
-## Advantages vs Monolithic
+## Advantages of Microservices Architecture
 
-| Aspect | Old (Monolithic) | New (Microservices) |
-|--------|------------------|---------------------|
-| **Services** | 1 combined service | 2 independent services |
-| **Ports** | 8501 | 8501 (Whisper) + 8502 (Pyannote) |
+| Aspect | Monolithic | Microservices |
+|--------|------------|---------------|
+| **Services** | 1 combined service | Independent services |
+| **Ports** | Single port | 8501 (Whisper) + 5501 (Backend) + 3501 (Frontend) |
 | **Start/Stop** | All or nothing | Individual control |
-| **Memory** | 10-12GB always | 6-8GB (Whisper) + 2-3GB (Pyannote) |
-| **Testing** | Must load both | Test each separately |
+| **Memory** | 8-10GB always | 6-8GB (Whisper) + 250MB (Backend+Frontend) |
+| **Testing** | Must load everything | Test each separately |
 | **Deployment** | Must be together | Can split across servers |
-| **Updates** | Restart both models | Update one, keep other running |
+| **Updates** | Restart everything | Update one, keep others running |
 | **Debugging** | Mixed logs | Separate logs per service |
-| **Resource Management** | Kill all or nothing | Kill heavy service, keep light one |
+| **Resource Management** | Kill all or nothing | Kill heavy service, keep light ones |
 
 ---
 
@@ -316,12 +247,10 @@ PYANNOTE_SERVICE_URL=https://gpu-server.com:8502
 ```bash
 # Check all services
 curl http://localhost:8501/health  # Whisper
-curl http://localhost:8502/health  # Pyannote
 curl http://localhost:5501/api/health  # Backend
 
 # One-liner
 curl -s localhost:8501/health | jq '.status' && \
-curl -s localhost:8502/health | jq '.status' && \
 curl -s localhost:5501/api/health | jq '.status'
 ```
 
@@ -330,9 +259,6 @@ curl -s localhost:5501/api/health | jq '.status'
 ```bash
 # Stop only Whisper
 lsof -ti:8501 | xargs kill
-
-# Stop only Pyannote
-lsof -ti:8502 | xargs kill
 
 # Stop Docker (Backend + Frontend)
 docker-compose down
@@ -344,10 +270,6 @@ docker-compose down
 # Restart Whisper
 lsof -ti:8501 | xargs kill
 cd whisper-service && ./start.sh
-
-# Restart Pyannote
-lsof -ti:8502 | xargs kill
-cd pyannote-service && ./start.sh
 ```
 
 ### View Logs
@@ -355,9 +277,6 @@ cd pyannote-service && ./start.sh
 ```bash
 # Whisper logs
 tail -f logs/whisper-service.log
-
-# Pyannote logs
-tail -f logs/pyannote-service.log
 
 # Backend logs
 docker-compose logs -f backend
@@ -382,19 +301,22 @@ docker-compose logs -f frontend
 # Work on backend
 # Edit backend/app.py → docker-compose restart backend
 
-# Work on model logic
-# Edit whisper-service/app.py → kill and restart just Whisper
+# Work on Whisper service
+# Edit whisper-service/app.py → kill and restart Whisper
 
 # Evening: Stop everything
 ./stop-all-services.sh
 ```
 
-### Testing New Model Versions
+### Testing Different Model Versions
 
 ```bash
 # Test Whisper Medium (faster, less accurate)
-# Create whisper-service-medium/ on port 8503
-# Update .env: WHISPER_SERVICE_URL=http://localhost:8503
+cd whisper-service
+# Edit app.py: whisper.load_model("medium")
+lsof -ti:8501 | xargs kill
+python3 app.py
+
 # No other changes needed!
 ```
 
@@ -407,18 +329,16 @@ docker-compose logs -f frontend
 ```
 Your Mac:
 ├── Whisper Service (Native, Port 8501)
-├── Pyannote Service (Native, Port 8502)
 └── Docker (Backend + Frontend)
 
 Start: ./start-all-services.sh
 Stop: ./stop-all-services.sh
 ```
 
-### Scenario 2: Whisper on GPU, Pyannote Local
+### Scenario 2: Whisper on GPU, Backend Local
 
 ```
 Your Mac:
-├── Pyannote Service (Native, Port 8502) - CPU is fine
 └── Docker (Backend + Frontend)
 
 GPU Server:
@@ -426,24 +346,18 @@ GPU Server:
 
 .env:
 WHISPER_SERVICE_URL=https://gpu-server.com:8501
-PYANNOTE_SERVICE_URL=http://host.docker.internal:8502
 ```
 
-### Scenario 3: Both Remote
+### Scenario 3: Full Remote
 
 ```
 Your Mac:
-└── Docker (Backend + Frontend only)
+└── Browser only
 
-GPU Server 1:
-└── Whisper Service (Port 8501)
-
-GPU Server 2:
-└── Pyannote Service (Port 8502)
-
-.env:
-WHISPER_SERVICE_URL=https://gpu1.example.com:8501
-PYANNOTE_SERVICE_URL=https://gpu2.example.com:8502
+Cloud Servers:
+├── Whisper Service (GPU)
+├── Backend (Docker)
+└── Frontend (Docker)
 ```
 
 ---
@@ -455,20 +369,16 @@ PYANNOTE_SERVICE_URL=https://gpu2.example.com:8502
 | Service | Idle | Processing |
 |---------|------|------------|
 | Whisper Service | ~4GB | ~6-8GB |
-| Pyannote Service | ~2GB | ~2-3GB |
 | Backend | ~50MB | ~100MB |
 | Frontend | ~100MB | ~150MB |
-| **Total (all running)** | ~6.2GB | ~8-11GB |
+| **Total (all running)** | ~4.2GB | ~6-8GB |
 
 ### Processing Time (30-min audio)
 
-| Setup | Whisper | Pyannote | Total |
-|-------|---------|----------|-------|
-| **Both on Mac CPU** | 15-20 min | 5-8 min | ~20-25 min |
-| **Whisper on GPU, Pyannote CPU** | 2-3 min | 5-8 min | ~7-10 min |
-| **Both on GPU** | 2-3 min | 1-2 min | ~3-5 min |
-
-**Note:** Services run in parallel, so total ≈ max(Whisper, Pyannote), not sum!
+| Setup | Whisper | Total |
+|-------|---------|-------|
+| **Mac CPU** | 15-20 min | ~15-20 min |
+| **GPU Server** | 2-3 min | ~2-3 min |
 
 ---
 
@@ -491,37 +401,18 @@ lsof -i :8501  # Check what's using the port
 pip3 install -r whisper-service/requirements.txt
 ```
 
-### Pyannote Service Won't Start
-
-```bash
-# Check logs
-tail -f logs/pyannote-service.log
-
-# Common issues:
-# 1. HF_TOKEN not set
-echo $HF_TOKEN  # Should show your token
-
-# 2. License not accepted
-# Visit: https://huggingface.co/pyannote/speaker-diarization-3.1
-
-# 3. Models incomplete
-du -sh models/pyannote/  # Should be ~500MB
-```
-
-### Backend Can't Reach Services
+### Backend Can't Reach Whisper Service
 
 ```bash
 # From within backend container
 docker exec -it transcription-backend bash
 curl http://host.docker.internal:8501/health
-curl http://host.docker.internal:8502/health
 
 # If fails, check:
-# 1. Services are running
+# 1. Whisper service is running
 ps aux | grep "python3 app.py"
 
-# 2. Firewall not blocking
-# 3. Docker has host access (extra_hosts in docker-compose.yml)
+# 2. Docker has host access (extra_hosts in docker-compose.yml)
 ```
 
 ---
@@ -534,7 +425,6 @@ ps aux | grep "python3 app.py"
 # Quick health check script
 #!/bin/bash
 echo "Whisper:  $(curl -s localhost:8501/health | jq -r '.status')"
-echo "Pyannote: $(curl -s localhost:8502/health | jq -r '.status')"
 echo "Backend:  $(curl -s localhost:5501/api/health | jq -r '.status')"
 echo "Frontend: $(curl -s localhost:3501 -o /dev/null -w '%{http_code}' 2>/dev/null)"
 ```
@@ -545,11 +435,8 @@ echo "Frontend: $(curl -s localhost:3501 -o /dev/null -w '%{http_code}' 2>/dev/n
 # Watch job progress in real-time
 watch -n 1 'curl -s localhost:5501/api/status/mentlist.mp3 | jq'
 
-# Watch both model services
-watch -n 2 'echo "=== Whisper Jobs ===" && \
-            curl -s localhost:8501/jobs | jq ".total" && \
-            echo "=== Pyannote Jobs ===" && \
-            curl -s localhost:8502/jobs | jq ".total"'
+# Watch Whisper jobs
+watch -n 2 'curl -s localhost:8501/jobs | jq ".total"'
 ```
 
 ---
@@ -561,27 +448,24 @@ watch -n 2 'echo "=== Whisper Jobs ===" && \
 ```
 Start: ./start-all-services.sh
 .env:  WHISPER_SERVICE_URL=http://host.docker.internal:8501
-       PYANNOTE_SERVICE_URL=http://host.docker.internal:8502
 ```
 
-### Phase 2: Test Remote Whisper
+### Phase 2: Whisper on GPU
 
 ```
 Deploy Whisper to GPU server
 .env:  WHISPER_SERVICE_URL=https://gpu-server.com:8501
-       PYANNOTE_SERVICE_URL=http://host.docker.internal:8502
 
-Result: 3x faster transcription!
+Result: 10x faster transcription!
 ```
 
-### Phase 3: Full Remote
+### Phase 3: Full Cloud
 
 ```
-Deploy both to cloud
-.env:  WHISPER_SERVICE_URL=https://whisper.example.com
-       PYANNOTE_SERVICE_URL=https://pyannote.example.com
+Deploy all to cloud
+Stop local services, access via web
 
-Stop local services, keep only Docker
+Result: No local resources needed!
 ```
 
 **No code changes in any phase!**
@@ -592,12 +476,11 @@ Stop local services, keep only Docker
 
 This microservices architecture gives you:
 
-✅ **Independent Control** - Start/stop each model service separately  
+✅ **Independent Control** - Start/stop Whisper service separately  
 ✅ **Flexible Deployment** - Mix local and remote services  
-✅ **Better Resource Management** - Kill services when not needed  
+✅ **Better Resource Management** - Kill Whisper when not needed  
 ✅ **Easy Testing** - Test models independently  
-✅ **Scalable** - Add more instances of any service  
+✅ **Scalable** - Add more Whisper instances if needed  
 ✅ **Portable** - Same code works local and remote  
 
 Perfect for your use case: develop locally, deploy to GPU when ready!
-
